@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PS5 Price Watch</title>
+<style>
+  :root {
+    --bg: #0d1420;
+    --panel: #141d2e;
+    --panel-2: #1b2740;
+    --line: #263455;
+    --text: #e7ecf5;
+    --muted: #8b98b3;
+    --accent: #00a3e0; /* PlayStation blue */
+    --sale: #ffb400;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 28px 20px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 {
+    margin: 0 0 4px;
+    font-size: 22px;
+    letter-spacing: 0.2px;
+  }
+  header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  main {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .banner {
+    background: linear-gradient(135deg, #14324a, #0d1420);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    display: none;
+  }
+  .banner.show { display: block; }
+  .banner strong { color: var(--sale); }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .card.discount { border-color: var(--sale); }
+  .game-name { font-weight: 600; font-size: 15px; }
+  .game-meta { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .price { text-align: right; white-space: nowrap; }
+  .price .now { font-weight: 700; font-size: 16px; }
+  .price .now.on-sale { color: var(--sale); }
+  .price .was { color: var(--muted); text-decoration: line-through; font-size: 12.5px; }
+  a.link { color: var(--accent); text-decoration: none; font-size: 12.5px; }
+  section.add {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 28px;
+  }
+  section.add h2 { margin: 0 0 6px; font-size: 15px; }
+  section.add p { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  input, button {
+    font-size: 14px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    padding: 9px 10px;
+    background: var(--panel-2);
+    color: var(--text);
+  }
+  input { width: 100%; margin-bottom: 8px; }
+  button {
+    background: var(--accent);
+    color: #06131f;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .status { font-size: 12.5px; margin-top: 8px; color: var(--muted); }
+  .empty { color: var(--muted); font-size: 14px; padding: 20px 0; }
+  details { margin-top: 10px; }
+  summary { color: var(--muted); font-size: 12.5px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PS5 Price Watch</h1>
+  <p id="last-checked">Loading last check time…</p>
+</header>
+
+<main>
+  <div class="banner" id="banner">
+    <strong id="banner-count"></strong> <span id="banner-text"></span>
+  </div>
+
+  <div id="list"></div>
+
+  <section class="add">
+    <h2>Add a game</h2>
+    <p>Find the game on the <a class="link" href="https://store.playstation.com/en-us/" target="_blank">PS Store</a>, copy its product page link, and paste it below.</p>
+    <input id="url-input" placeholder="https://store.playstation.com/en-us/product/UP..." />
+    <input id="name-input" placeholder="Display name (e.g. Ghost of Tsushima)" />
+    <button id="add-btn">Add to watchlist</button>
+    <div class="status" id="add-status"></div>
+
+    <details>
+      <summary>Settings (GitHub token, needed once to save changes)</summary>
+      <p style="margin-top:10px">
+        This page can't save files on its own — it's a static site. To let it commit new
+        games to your repo, paste a GitHub <a class="link" href="https://github.com/settings/personal-access-tokens/new" target="_blank">fine-grained personal access token</a>
+        scoped to <em>this repo only</em> with <strong>Contents: read and write</strong> permission.
+        It's stored only in this browser (localStorage), never sent anywhere but api.github.com.
+      </p>
+      <input id="token-input" placeholder="github_pat_..." />
+      <input id="repo-input" placeholder="yourusername/ps5-price-tracker" />
+      <button id="save-settings-btn">Save settings</button>
+      <div class="status" id="settings-status"></div>
+    </details>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function loadData() {
+  try {
+    const [games, notif] = await Promise.all([
+      fetch("games.json", { cache: "no-store" }).then(r => r.json()),
+      fetch("data/notifications.json", { cache: "no-store" }).then(r => r.json()),
+    ]);
+    render(games, notif);
+  } catch (e) {
+    $("list").innerHTML = `<div class="empty">Couldn't load data yet — the first Action run hasn't completed, or this page isn't being served from GitHub Pages.</div>`;
+  }
+}
+
+function render(games, notif) {
+  const lastChecked = notif.last_checked
+    ? new Date(notif.last_checked).toLocaleString()
+    : "never (waiting on first Action run)";
+  $("last-checked").textContent = `Last checked: ${lastChecked}`;
+
+  const discountByName = {};
+  (notif.active_discounts || []).forEach(d => discountByName[d.name] = d);
+
+  if (notif.recent_alerts && notif.recent_alerts.length) {
+    $("banner").classList.add("show");
+    $("banner-count").textContent = `${notif.recent_alerts.length} new discount${notif.recent_alerts.length > 1 ? "s" : ""}!`;
+    $("banner-text").textContent = notif.recent_alerts.map(a => a.name).join(", ") + " just went on sale.";
+    if (window.Notification && Notification.permission === "granted") {
+      new Notification("PS5 Price Watch", { body: $("banner-text").textContent });
+    } else if (window.Notification && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+  }
+
+  const real = games.filter(g => !(g.note && g.name.startsWith("Example")));
+  if (!real.length) {
+    $("list").innerHTML = `<div class="empty">No games tracked yet — add one below.</div>`;
+    return;
+  }
+
+  $("list").innerHTML = real.map(g => {
+    const d = discountByName[g.name];
+    if (d) {
+      return `<div class="card discount">
+        <div>
+          <div class="game-name">${g.name}</div>
+          <div class="game-meta"><a class="link" href="${d.url}" target="_blank">Open in PS Store</a></div>
+        </div>
+        <div class="price">
+          <div class="now on-sale">$${d.current_price} ${d.discount_pct ? `(${d.discount_pct})` : ""}</div>
+          <div class="was">$${d.base_price}</div>
+        </div>
+      </div>`;
+    }
+    return `<div class="card">
+      <div>
+        <div class="game-name">${g.name}</div>
+        <div class="game-meta">Watching — no discount right now</div>
+      </div>
+      <div class="price"><div class="now">—</div></div>
+    </div>`;
+  }).join("");
+}
+
+function loadSettings() {
+  $("token-input").value = localStorage.getItem("gh_token") || "";
+  $("repo-input").value = localStorage.getItem("gh_repo") || "";
+}
+$("save-settings-btn").onclick = () => {
+  localStorage.setItem("gh_token", $("token-input").value.trim());
+  localStorage.setItem("gh_repo", $("repo-input").value.trim());
+  $("settings-status").textContent = "Saved.";
+};
+
+function extractId(url) {
+  const m = url.match(/\/product\/([^/?#]+)/);
+  return m ? m[1] : null;
+}
+
+$("add-btn").onclick = async () => {
+  const url = $("url-input").value.trim();
+  const name = $("name-input").value.trim();
+  const status = $("add-status");
+  const id = extractId(url);
+
+  if (!id || !name) {
+    status.textContent = "Paste a valid PS Store product URL and give it a name.";
+    return;
+  }
+  const token = localStorage.getItem("gh_token");
+  const repo = localStorage.getItem("gh_repo");
+  if (!token || !repo) {
+    status.textContent = "Set your GitHub token + repo in Settings first (below).";
+    return;
+  }
+
+  status.textContent = "Saving…";
+  try {
+    const path = "docs/games.json";
+    const apiUrl = `https://api.github.com/repos/${repo}/contents/${path}`;
+    const cur = await fetch(apiUrl, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+    }).then(r => r.json());
+
+    const content = JSON.parse(atob(cur.content));
+    const cleaned = content.filter(g => !(g.note && g.name.startsWith("Example")));
+    cleaned.push({ name, id });
+
+    const updated = btoa(JSON.stringify(cleaned, null, 2));
+    const put = await fetch(apiUrl, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+      body: JSON.stringify({
+        message: `Add ${name} to watchlist`,
+        content: updated,
+        sha: cur.sha,
+      }),
+    });
+    if (!put.ok) throw new Error(await put.text());
+
+    status.textContent = `Added ${name}. It'll show up after the next price check runs (or trigger it manually from the Actions tab).`;
+    $("url-input").value = "";
+    $("name-input").value = "";
+  } catch (e) {
+    status.textContent = "Failed to save — check your token has write access to this repo.";
+    console.error(e);
+  }
+};
+
+loadSettings();
+loadData();
+</script>
+</body>
+</html>
